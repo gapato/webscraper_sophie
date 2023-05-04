@@ -26,9 +26,14 @@ class WillhabenSpider(scrapy.Spider):
     Here is a summary of the most important spider attributes. A detailed
     documentation can be found in the `official Scrapy documentation
     """
-    # Graz
-    START_URL = 'https://www.willhaben.at/iad/immobilien/eigentumswohnung/steiermark/graz/'
-    ITEM_URL_REGEX = r"\"url\":\"(\/iad\/immobilien\/d\/eigentumswohnung\/steiermark\/graz\/[a-z,A-Z,0-9,-]+\/)\""
+    # Graz flats for rent
+    START_URL = 'https://www.willhaben.at/iad/immobilien/mietwohnungen/steiermark/graz/'
+    ITEM_URL_REGEX = r"\"url\":\"(\/iad\/immobilien\/d\/mietwohnungen\/steiermark\/graz\/[a-z,A-Z,0-9,-]+\/)\""
+
+    # Graz flats for sale
+    # START_URL = 'https://www.willhaben.at/iad/immobilien/eigentumswohnung/steiermark/graz/'
+    # ITEM_URL_REGEX = r"\"url\":\"(\/iad\/immobilien\/d\/eigentumswohnung\/steiermark\/graz\/[a-z,A-Z,0-9,-]+\/)\""
+
     # # Graz-Umgebung
     # START_URL = 'https://www.willhaben.at/iad/immobilien/eigentumswohnung/steiermark/graz-umgebung/'
     # ITEM_URL_REGEX = r"\"url\":\"(\/iad\/immobilien\/d\/eigentumswohnung\/steiermark\/graz-umgebung\/[a-z,A-Z,0-9,-]+\/)\""

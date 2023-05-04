@@ -30,10 +30,17 @@ class CondoItem(scrapy.Item):
     DEFAULT_VALUE_INT = 0
     DEFAULT_VAULE_BOOL = False
 
-    MIN_PRICE = 1000
-    MAX_PRICE = 1500000
-    MIN_SIZE = 10
-    MAX_SIZE = 250
+    # Rent
+    MIN_PRICE = 100
+    MAX_PRICE = 3500
+    MIN_SIZE = 30
+    MAX_SIZE = 2000
+
+    # Buy
+    # MIN_PRICE = 1000
+    # MAX_PRICE = 1500000
+    # MIN_SIZE = 10
+    # MAX_SIZE = 250
 
     def set_default_values(self):
         # init fields if needed
