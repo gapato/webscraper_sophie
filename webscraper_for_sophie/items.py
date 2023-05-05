@@ -13,11 +13,13 @@ class CondoItem(scrapy.Item):
     # name = scrapy.Field()
     url = scrapy.Field()
     title = scrapy.Field()
-    price = scrapy.Field()
+    current_price = scrapy.Field()
     size = scrapy.Field()
     room_count = scrapy.Field()
     postal_code = scrapy.Field()
     district = scrapy.Field()
+    features_info = scrapy.Field()
+    energy_info = scrapy.Field()
     discovery_date = scrapy.Field()
     edit_date = scrapy.Field()
     description = scrapy.Field()
@@ -46,7 +48,7 @@ class CondoItem(scrapy.Item):
         # init fields if needed
         # no init value needed for self['url'] and self['discovery_date']
         self['title'] = self.DEFAULT_VALUE_STRING
-        self['price'] = self.DEFAULT_VALUE_INT
+        self['current_price'] = self.DEFAULT_VALUE_INT
         self['size'] = self.DEFAULT_VALUE_INT
         self['room_count'] = self.DEFAULT_VALUE_INT
         self['postal_code'] = self.DEFAULT_VALUE_STRING
@@ -57,11 +59,13 @@ class CondoItem(scrapy.Item):
         self['willhaben_code'] = self.DEFAULT_VALUE_STRING
         self['commission_fee'] = self.DEFAULT_VALUE_STRING
         self['price_per_m2'] = self.DEFAULT_VALUE_INT
+        self['energy_info']   = None
+        self['features_info'] = None
 
     def calc_price_per_m2(self):
         """ Calculate the price per square meter. """
         if self['size']:
-            self['price_per_m2'] = self['price'] / self['size']
+            self['price_per_m2'] = self['current_price'] / self['size']
 
     def parse_price(self, price_text):
         """ Parses the price from the input text.
@@ -81,7 +85,7 @@ class CondoItem(scrapy.Item):
             else:
                 # realisitic value check
                 if price_int > self.MIN_PRICE and price_int < self.MAX_PRICE:
-                    self['price'] = price_int
+                    self['current_price'] = price_int
                 else:
                     logging.error("Unrealistic price at page " + self['url'])
 

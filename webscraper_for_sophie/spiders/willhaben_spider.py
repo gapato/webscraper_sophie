@@ -38,6 +38,10 @@ class WillhabenSpider(scrapy.Spider):
     # START_URL = 'https://www.willhaben.at/iad/immobilien/eigentumswohnung/steiermark/graz-umgebung/'
     # ITEM_URL_REGEX = r"\"url\":\"(\/iad\/immobilien\/d\/eigentumswohnung\/steiermark\/graz-umgebung\/[a-z,A-Z,0-9,-]+\/)\""
 
+    DATE_FORMAT_STRING = "%d.%m.%Y, %H:%M Uhr"
+
+    COMMISSION_REGEX = re.compile(r"""provi([a-z]+)frei|privatperson|bezahlt der abgeber""", flags=re.I)
+
     ITEM_IMG_REGEX = r'"referenceImageUrl":"(https:\/\/cache.willhaben.at[-a-zA-Z0-9@:%._\+~#=/]+)"'
     BASE_URL = "https://www.willhaben.at"
     name = 'willhaben'
@@ -145,6 +149,47 @@ class WillhabenSpider(scrapy.Spider):
             logging.error(
                 "attribute elements not found on page " + item['url'])
 
+        # energy info
+        energy_tag = soup.find(
+            'div', attrs={"data-testid": "energy-pass-box"})
+        if energy_tag:
+            info = ""
+            i = 0
+            while True:
+                label_tag = energy_tag.find(
+                        'span', attrs={"data-testid": "energy-pass-attribute-label-%d" % (i)})
+                value_tag = energy_tag.find(
+                        'span', attrs={"data-testid": "energy-pass-attribute-value-%d" % (i)})
+                if label_tag and value_tag:
+                    if len(info) > 0:
+                        info += ", "
+                    label = label_tag.get_text().replace(" ", "").replace(":", "")
+                    info += '"%s": "%s"' % (label, value_tag.get_text())
+                    i += 1
+                else:
+                    break
+            item['energy_info'] = info
+        else:
+            logging.warning(
+                "energy info element not found on page " + item['url'])
+
+        # features info
+        features_title_tag = soup.find('h2', string="Objektinformationen")
+        if features_title_tag:
+            features_tags = features_title_tag.next_sibling.findAll('li', attrs={"data-testid": "attribute-item"})
+            info = ""
+            for ft in features_tags:
+                label_tag = ft.find("div", attrs={"data-testid":"attribute-title"}).text
+                value_tag = ft.find("div", attrs={"data-testid":"attribute-value"}).text
+                if label_tag and value_tag:
+                    if len(info) > 0:
+                        info += ", "
+                    info += '"%s": "%s"' % (label_tag, value_tag)
+            item['features_info'] = info
+        else:
+            logging.warning(
+                "features info element not found on page " + item['url'])
+
         # address, postal_code and district
         location_address_tag = soup.find(
             'div', attrs={"data-testid": "object-location-address"})
@@ -189,7 +234,7 @@ class WillhabenSpider(scrapy.Spider):
         edit_date_tag = soup.find(
             'span', attrs={"data-testid": "ad-detail-ad-edit-date"})
         if edit_date_tag:
-            item['edit_date'] = edit_date_tag.get_text()
+            item['edit_date'] = datetime.datetime.strptime(edit_date_tag.get_text(), self.DATE_FORMAT_STRING)
         else:
             logging.error("edit_date element not found on page " + item['url'])
 
@@ -197,10 +242,10 @@ class WillhabenSpider(scrapy.Spider):
         body_tag = soup.find('article')
         if body_tag:
             body_text = body_tag.get_text()
-            if 'provisionsfrei' in body_text.lower():
+            if self.COMMISSION_REGEX.search(body_text):
                 item['commission_fee'] = 0
             else:
-                item['commission_fee'] = 3.6
+                item['commission_fee'] = 1
         else:
             logging.error(
                 "commission_fee element not found on page " + item['url'])
