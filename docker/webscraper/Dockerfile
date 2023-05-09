@@ -1,5 +1,5 @@
 # Start a new Python 3.8 parent image (see https://hub.docker.com/r/library/python)
-FROM python:3.8
+FROM python:3.9
 
 # Avoid .pyc files
 ENV PYTHONDONTWRITEBYTECODE 1

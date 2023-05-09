@@ -17,6 +17,8 @@ from bs4 import BeautifulSoup
 # project modules
 from webscraper_for_sophie.items import CondoItem
 
+import json
+
 
 class WillhabenSpider(scrapy.Spider):
     """
@@ -26,9 +28,22 @@ class WillhabenSpider(scrapy.Spider):
     Here is a summary of the most important spider attributes. A detailed
     documentation can be found in the `official Scrapy documentation
     """
+    
+    # crumbs = ["mietwohnungen", "haus-mieten", "eigentumswohnung", "haus-kaufen"]
+
     # Graz flats for rent
-    START_URL = 'https://www.willhaben.at/iad/immobilien/mietwohnungen/steiermark/graz/'
-    ITEM_URL_REGEX = r"\"url\":\"(\/iad\/immobilien\/d\/mietwohnungen\/steiermark\/graz\/[a-z,A-Z,0-9,-]+\/)\""
+    START_URL_FLATS = 'https://www.willhaben.at/iad/immobilien/mietwohnungen/steiermark/graz/?rows=90'
+    ITEM_URL_REGEX_SHORT_FLATS = 'https://www.willhaben.at/iad/immobilien/d/mietwohnungen/steiermark/graz/'
+    ITEM_URL_REGEX_FLATS = r"\"url\":\"(\/iad\/immobilien\/d\/mietwohnungen\/steiermark\/graz\/[a-z,A-Z,0-9,-]+\/)\""
+
+    # # Graz houses for rent
+    START_URL_HOUSES = 'https://www.willhaben.at/iad/immobilien/haus-mieten/steiermark/graz/?rows=90'
+    ITEM_URL_REGEX_SHORT_HOUSES = 'https://www.willhaben.at/iad/immobilien/d/haus-mieten/steiermark/graz/'
+    ITEM_URL_REGEX_HOUSES = r"\"url\":\"(\/iad\/immobilien\/d\/haus-mieten\/steiermark\/graz\/[a-z,A-Z,0-9,-]+\/)\""
+
+    WILLHABEN_CODE_REGEX = re.compile(r"""\d{6,}""")
+
+    ITEM_PRICE_DATA_CLASS = "search-result-entry-price-%s"
 
     # Graz flats for sale
     # START_URL = 'https://www.willhaben.at/iad/immobilien/eigentumswohnung/steiermark/graz/'
@@ -38,17 +53,43 @@ class WillhabenSpider(scrapy.Spider):
     # START_URL = 'https://www.willhaben.at/iad/immobilien/eigentumswohnung/steiermark/graz-umgebung/'
     # ITEM_URL_REGEX = r"\"url\":\"(\/iad\/immobilien\/d\/eigentumswohnung\/steiermark\/graz-umgebung\/[a-z,A-Z,0-9,-]+\/)\""
 
+    PRICE_REGEX = re.compile(r"""\d+""")
+
     DATE_FORMAT_STRING = "%d.%m.%Y, %H:%M Uhr"
 
     COMMISSION_REGEX = re.compile(r"""provi([a-z]+)frei|privatperson|bezahlt der abgeber""", flags=re.I)
+
+    NO_DURATION_REGEX = re.compile(r"""keine|unbefristet""", flags=re.I)
+
+    DURATION_SUFFIX_REGEX = re.compile(r""" Jahr\(e\)$| Jahre$| Jahr$""")
+
+    ALTBAU_REGEX = re.compile(r"""altbau|neubau""", flags=re.I)
 
     ITEM_IMG_REGEX = r'"referenceImageUrl":"(https:\/\/cache.willhaben.at[-a-zA-Z0-9@:%._\+~#=/]+)"'
     BASE_URL = "https://www.willhaben.at"
     name = 'willhaben'
     allowed_domains = ['willhaben.at']
     start_urls = [
-        START_URL
+        START_URL_FLATS, START_URL_HOUSES
     ]
+
+    def __init__(self):
+        super()
+        self.stats = {"flats": {"seen": 0, "crawled": 0, "new": 0, "price_changed": 0},
+                      "houses": {"seen": 0, "crawled": 0, "new": 0, "price_changed": 0}}
+
+    def get_type(self, response):
+        url = response.url
+
+        if url.startswith(self.START_URL_FLATS):
+            return "flat", self.ITEM_URL_REGEX_FLATS
+        if url.startswith(self.START_URL_HOUSES):
+            return "house", self.ITEM_URL_REGEX_HOUSES
+        raise ValueError("Could not determine item from for url %s" % url)
+
+    def load_known_items(self, known_items):
+        self.known_items = known_items
+        logging.info("Got %d known items" % len(known_items))
 
     def parse(self, response):
         """
@@ -57,8 +98,14 @@ class WillhabenSpider(scrapy.Spider):
         `start_urls`
         """
 
+        # get the next page of the list
+        soup = BeautifulSoup(response.text, 'lxml')
+
+        item_type, item_url_regex = self.get_type(response)
+        stats_key = item_type + "s"
+
         # get item urls and yield a request for each item
-        relative_item_urls = re.findall(self.ITEM_URL_REGEX, response.text)
+        relative_item_urls = re.findall(item_url_regex, response.text)
         item_count = len(relative_item_urls)
         if item_count == 25:
             logging.info("Found {} items on page {}".format(
@@ -70,17 +117,54 @@ class WillhabenSpider(scrapy.Spider):
             logging.error("Found only {} items on page {}".format(
                 item_count, response.url))
 
-        for relative_item_url in relative_item_urls:
-            full_item_url = self.BASE_URL + relative_item_url
-            yield scrapy.Request(full_item_url, self.parse_item)
+        data_script_tag = soup.find(id="__NEXT_DATA__")
+        if data_script_tag:
+            logging.info("Found NEXT_DATA script tag")
+            data_script_data = data_script_tag.string
+            full_data = json.loads(data_script_data)
+            ad_data_string = full_data["props"]["pageProps"]["searchResult"]["taggingData"]["tmsDataValues"]["tmsData"]["search_results"]
+            ad_data = json.loads(ad_data_string)
 
-        # get the next page of the list
-        soup = BeautifulSoup(response.text, 'lxml')
+            price_data = { ad["adId"]:ad.get("price") for ad in ad_data if ad.get("price") }
+        else:
+            logging.error("Did not find NEXT_DATA script tag!")
+            price_data = {}
+
+        for relative_item_url in relative_item_urls:
+
+            self.stats[stats_key]["seen"] += 1
+
+            # this should always match
+            willhaben_code = self.WILLHABEN_CODE_REGEX.match(relative_item_url.split("-")[-1])
+            if willhaben_code:
+                willhaben_code = willhaben_code[0]
+                # check for matching item in the database
+                known_price = self.known_items.get(willhaben_code, None)
+                if known_price:
+                    # logging.info("item with code '%s' is known, price: %dEUR" % (willhaben_code, known_price))
+                    current_price_int = int(float(price_data.get(willhaben_code, -1)))
+                    if known_price == current_price_int:
+                        logging.info("price for item %s (%d EUR) did not change, skipping" % (willhaben_code, current_price_int))
+                        continue
+                    else:
+                        logging.info("price for item %s (%d → %d EUR) changed!" % (willhaben_code, known_price, current_price_int))
+                        self.stats[stats_key]["price_changed"] += 1
+                else:
+                    self.stats[stats_key]["new"] += 1
+                    logging.info("item '%s' is unknown" % (willhaben_code))
+
+            self.stats[stats_key]["crawled"] += 1
+            logging.info("queueing %s" % (relative_item_url))
+            full_item_url = self.BASE_URL + relative_item_url
+            yield scrapy.Request(full_item_url, self.parse_item, meta={"item_type":item_type})
+
         pagination_btn = soup.find(
             'a', attrs={"data-testid": "pagination-top-next-button"})
-        next_page_url = self.BASE_URL + pagination_btn['href']
+        try:
+            next_page_url = self.BASE_URL + pagination_btn['href']
+        except:
+            return
         yield scrapy.Request(next_page_url, self.parse)
-        # TODO error handling
 
     def parse_item(self, response):
         """returns/yields a :py:class:`WillhabenItem`.
@@ -91,6 +175,9 @@ class WillhabenSpider(scrapy.Spider):
         item.set_default_values()
         item['url'] = response.url
         item['discovery_date'] = datetime.datetime.now().strftime("%Y-%m-%d")
+
+        item['type'] = response.meta["item_type"]
+
         # time could also be added if needed: "%Y-%m-%d %H:%M:%S"
 
         soup = BeautifulSoup(response.text, 'lxml')
@@ -104,6 +191,8 @@ class WillhabenSpider(scrapy.Spider):
             item['title'] = title_tag.get_text()
         else:
             logging.error("title element not found on page " + item['url'])
+
+        body_tag = soup.find('article')
 
         # price
         price_tag = soup.find(
@@ -164,7 +253,12 @@ class WillhabenSpider(scrapy.Spider):
                     if len(info) > 0:
                         info += ", "
                     label = label_tag.get_text().replace(" ", "").replace(":", "")
-                    info += '"%s": "%s"' % (label, value_tag.get_text())
+                    value = value_tag.get_text()
+                    info += '"%s": "%s"' % (label, value)
+
+                    if "HWB(kWh" in label:
+                        item['heating_consumption'] = float(value.replace(',', '.'))
+
                     i += 1
                 else:
                     break
@@ -185,7 +279,18 @@ class WillhabenSpider(scrapy.Spider):
                     if len(info) > 0:
                         info += ", "
                     info += '"%s": "%s"' % (label_tag, value_tag)
+                    if label_tag == "Befristung":
+                        if self.NO_DURATION_REGEX.search(value_tag):
+                            item['contract_duration'] = '0'
+                        else:
+                            item['contract_duration'] = self.DURATION_SUFFIX_REGEX.sub("", value_tag)
+                    elif label_tag == "Bautyp":
+                        item['construction_type'] = value_tag.lower()
             item['features_info'] = info
+            if (not item['construction_type']) and body_tag:
+                m = self.ALTBAU_REGEX.search(body_tag.get_text())
+                if m:
+                    item['construction_type'] = m[0].lower()
         else:
             logging.warning(
                 "features info element not found on page " + item['url'])
@@ -238,8 +343,11 @@ class WillhabenSpider(scrapy.Spider):
         else:
             logging.error("edit_date element not found on page " + item['url'])
 
+        # private seller
+        if body_tag:
+            item['seller_is_private'] = body_tag.find('div', attrs={"data-testid": "ad-detail-contact-box-private-top"}) is not None
+
         # commission_fee
-        body_tag = soup.find('article')
         if body_tag:
             body_text = body_tag.get_text()
             if self.COMMISSION_REGEX.search(body_text):

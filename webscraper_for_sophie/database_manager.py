@@ -66,15 +66,21 @@ class DatabaseManager():
 
     def prep_table(self):
 
-        """ drop the table (testing) """
-        sql_command = "DROP TABLE {0};".format(TABLENAME)
-        self.cursor.execute(sql_command)
-
         """ create a new table if the provided table name does not exist. """
         sql_command = "SHOW TABLES LIKE '{0}'".format(TABLENAME)
         self.cursor.execute(sql_command)
         result = self.cursor.fetchone()  # fetch will return a python tuple
-        if result is None:
+
+        drop = False
+
+        if result and drop:
+            # """ drop the table (testing) """
+            logging.debug("Dropping table")
+            sql_command = "DROP TABLE {0};".format(TABLENAME)
+            self.cursor.execute(sql_command)
+            self.connection.commit()
+
+        if drop or not result:
             logging.debug("Database table does not exist")
 
             # create table
@@ -84,6 +90,7 @@ class DatabaseManager():
             willhaben_code VARCHAR(10) COLLATE utf8_bin,
             postal_code VARCHAR(10) COLLATE utf8_bin,
             district VARCHAR(100) COLLATE utf8_bin,
+            type VARCHAR(10) COLLATE utf8_bin,
             current_price INTEGER,
             min_price INTEGER,
             max_price INTEGER,
@@ -92,8 +99,12 @@ class DatabaseManager():
             max_price_date DATETIME,
             previous_price_date DATETIME,
             energy_info TEXT COLLATE utf8_bin,
+            heating_consumption FLOAT,
+            seller_is_private BIT,
             features_info TEXT COLLATE utf8_bin,
             commission_fee FLOAT,
+            construction_type VARCHAR(100) COLLATE utf8_bin,
+            contract_duration VARCHAR(100) COLLATE utf8_bin,
             size INTEGER,
             room_count INTEGER,
             price_per_m2 FLOAT,
@@ -106,6 +117,12 @@ class DatabaseManager():
             self.connection.commit()
             logging.debug("New database table has been created")
 
+    def get_known_items(self):
+        sql_command = """SELECT willhaben_code, current_price FROM {0};""".format(TABLENAME)
+        self.cursor.execute(sql_command)
+        result = self.cursor.fetchall()
+        return { i["willhaben_code"]:i["current_price"] for i in result }
+
     def store_item(self, item):
         """
         Store a new item in the database
@@ -115,7 +132,7 @@ class DatabaseManager():
         """
 
         # check for existing item (with identical willhaben code)
-        sql_command = """SELECT id, current_price, min_price, max_price, previous_price FROM {0} where willhaben_code = %s LIMIT 1""".format(TABLENAME)
+        sql_command = """SELECT id, current_price, min_price, max_price, previous_price, min_price_date, max_price_date, previous_price_date, edit_date FROM {0} where willhaben_code = %s LIMIT 1""".format(TABLENAME)
         sql_command_args = (item['willhaben_code'], )
 
         self.cursor.execute(sql_command, sql_command_args)
@@ -134,38 +151,44 @@ class DatabaseManager():
                 if item['current_price'] < result['min_price']:
                     result['min_price'] = item['current_price']
                     result['min_price_date'] = item['edit_date']
+            else:
+                return
 
-            sql_command = """UPDATE {0} SET
-                                (current_price=%s, price_per_m2=%s,
-                                min_price=%s, max_price=%s, previous_price=%s,
-                                min_price_date=%s, max_price_date=%s, previous_price_date=%s)
-                            WHERE id = %s;""".format(TABLENAME)
+            sql_command = """UPDATE {0} SET current_price=%s, price_per_m2=%s, min_price=%s, max_price=%s, previous_price=%s, min_price_date=%s, max_price_date=%s, previous_price_date=%s WHERE id = %s;""".format(TABLENAME)
 
             update_tuple = (result['current_price'], item['price_per_m2'],
                                 result['min_price'], result['max_price'], result['previous_price'],
                                 result['min_price_date'], result['max_price_date'], result['previous_price_date'],
                                 result['id'])
-            self.cursor.execute(sql_command, update_tuple)
+            try:
+                self.cursor.execute(sql_command, update_tuple)
+            except:
+                logging.error(self.cursor.statement)
+                raise
+        
 
         else:
             # fill table of database with data
             sql_command = """INSERT INTO {0}
-                                (id, willhaben_code, postal_code, district, current_price,
+                                (id, willhaben_code, postal_code, district, type, current_price,
                                 min_price, max_price, previous_price,
                                 min_price_date, max_price_date, previous_price_date,
                                 energy_info, features_info,
+                                heating_consumption, seller_is_private, contract_duration,
+                                construction_type,
                                 commission_fee, size, room_count, price_per_m2,
                                 discovery_date, title, url, edit_date, address)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
                             """.format(TABLENAME)
 
             insert_tuple = (None, item['willhaben_code'], item['postal_code'],
-                            item['district'], item['current_price'],
+                            item['district'], item['type'], item['current_price'],
                             item['current_price'], item['current_price'], item['current_price'],
                             item['edit_date'], item['edit_date'], item['edit_date'],
                             item['energy_info'], item['features_info'],
-                            item['commission_fee'],
+                            item['heating_consumption'], item['seller_is_private'], item['contract_duration'],
+                            item['construction_type'], item['commission_fee'],
                             item['size'], item['room_count'], item['price_per_m2'],
                             item['discovery_date'], item['title'], item['url'],
                             item['edit_date'], item['address'])
