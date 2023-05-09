@@ -19,7 +19,7 @@ class WebscraperForSophiePipeline:
         self.db_manager = DatabaseManager()
         self.db_manager.connect()
         self.db_manager.prep_table()
-        spider.store_known_items(self.db_manager.get_known_items())
+        spider.load_known_items(self.db_manager.get_known_items())
 
     def close_spider(self, spider):
         """ This method is called when the spider is closed. """

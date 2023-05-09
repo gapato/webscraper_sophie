@@ -29,29 +29,18 @@ class WillhabenSpider(scrapy.Spider):
     documentation can be found in the `official Scrapy documentation
     """
     
-    # crumbs = ["mietwohnungen", "haus-mieten", "eigentumswohnung", "haus-kaufen"]
+    CRUMBS = { "mietwohnungen" : ["rent", "flat"],
+               "haus-mieten" : ["rent", "house"],
+               "eigentumswohnung" : ["sale", "flat"],
+               "haus-kaufen" : ["sale", "house"] }
 
     # Graz flats for rent
-    START_URL_FLATS = 'https://www.willhaben.at/iad/immobilien/mietwohnungen/steiermark/graz/?rows=90'
-    ITEM_URL_REGEX_SHORT_FLATS = 'https://www.willhaben.at/iad/immobilien/d/mietwohnungen/steiermark/graz/'
-    ITEM_URL_REGEX_FLATS = r"\"url\":\"(\/iad\/immobilien\/d\/mietwohnungen\/steiermark\/graz\/[a-z,A-Z,0-9,-]+\/)\""
-
-    # # Graz houses for rent
-    START_URL_HOUSES = 'https://www.willhaben.at/iad/immobilien/haus-mieten/steiermark/graz/?rows=90'
-    ITEM_URL_REGEX_SHORT_HOUSES = 'https://www.willhaben.at/iad/immobilien/d/haus-mieten/steiermark/graz/'
-    ITEM_URL_REGEX_HOUSES = r"\"url\":\"(\/iad\/immobilien\/d\/haus-mieten\/steiermark\/graz\/[a-z,A-Z,0-9,-]+\/)\""
+    START_URL_TEMPLATE = 'https://www.willhaben.at/iad/immobilien/%s/steiermark/graz/?rows=90'
+    ITEM_URL_REGEX_TEMPLATE = r"\"url\":\"(\/iad\/immobilien\/d\/%s\/steiermark\/graz\/[a-z,A-Z,0-9,-]+\/)\""
 
     WILLHABEN_CODE_REGEX = re.compile(r"""\d{6,}""")
 
     ITEM_PRICE_DATA_CLASS = "search-result-entry-price-%s"
-
-    # Graz flats for sale
-    # START_URL = 'https://www.willhaben.at/iad/immobilien/eigentumswohnung/steiermark/graz/'
-    # ITEM_URL_REGEX = r"\"url\":\"(\/iad\/immobilien\/d\/eigentumswohnung\/steiermark\/graz\/[a-z,A-Z,0-9,-]+\/)\""
-
-    # # Graz-Umgebung
-    # START_URL = 'https://www.willhaben.at/iad/immobilien/eigentumswohnung/steiermark/graz-umgebung/'
-    # ITEM_URL_REGEX = r"\"url\":\"(\/iad\/immobilien\/d\/eigentumswohnung\/steiermark\/graz-umgebung\/[a-z,A-Z,0-9,-]+\/)\""
 
     PRICE_REGEX = re.compile(r"""\d+""")
 
@@ -66,25 +55,27 @@ class WillhabenSpider(scrapy.Spider):
     ALTBAU_REGEX = re.compile(r"""altbau|neubau""", flags=re.I)
 
     ITEM_IMG_REGEX = r'"referenceImageUrl":"(https:\/\/cache.willhaben.at[-a-zA-Z0-9@:%._\+~#=/]+)"'
+
     BASE_URL = "https://www.willhaben.at"
     name = 'willhaben'
     allowed_domains = ['willhaben.at']
-    start_urls = [
-        START_URL_FLATS, START_URL_HOUSES
-    ]
 
     def __init__(self):
         super()
-        self.stats = {"flats": {"seen": 0, "crawled": 0, "new": 0, "price_changed": 0},
-                      "houses": {"seen": 0, "crawled": 0, "new": 0, "price_changed": 0}}
+        self.start_urls = [ self.START_URL_TEMPLATE % crumb for crumb in self.CRUMBS.keys() ]
+        self.stats = {"rent flats": {"seen": 0, "crawled": 0, "new": 0, "price_changed": 0},
+                      "sale flats": {"seen": 0, "crawled": 0, "new": 0, "price_changed": 0},
+                      "rent houses": {"seen": 0, "crawled": 0, "new": 0, "price_changed": 0},
+                      "sale houses": {"seen": 0, "crawled": 0, "new": 0, "price_changed": 0}}
 
     def get_type(self, response):
         url = response.url
 
-        if url.startswith(self.START_URL_FLATS):
-            return "flat", self.ITEM_URL_REGEX_FLATS
-        if url.startswith(self.START_URL_HOUSES):
-            return "house", self.ITEM_URL_REGEX_HOUSES
+        crumb = url.split("/")[5]
+        value = self.CRUMBS.get(crumb)
+        if value:
+            rent_sale, type = value
+            return self.ITEM_URL_REGEX_TEMPLATE % crumb, rent_sale, type
         raise ValueError("Could not determine item from for url %s" % url)
 
     def load_known_items(self, known_items):
@@ -101,21 +92,11 @@ class WillhabenSpider(scrapy.Spider):
         # get the next page of the list
         soup = BeautifulSoup(response.text, 'lxml')
 
-        item_type, item_url_regex = self.get_type(response)
-        stats_key = item_type + "s"
+        item_url_regex, rent_sale, item_type = self.get_type(response)
+        stats_key = "%s %ss" % (rent_sale, item_type)
 
         # get item urls and yield a request for each item
         relative_item_urls = re.findall(item_url_regex, response.text)
-        item_count = len(relative_item_urls)
-        if item_count == 25:
-            logging.info("Found {} items on page {}".format(
-                item_count, response.url))
-        elif item_count >= 20:
-            logging.warning("Found only {} items on page {}".format(
-                item_count, response.url))
-        else:
-            logging.error("Found only {} items on page {}".format(
-                item_count, response.url))
 
         data_script_tag = soup.find(id="__NEXT_DATA__")
         if data_script_tag:
@@ -156,7 +137,7 @@ class WillhabenSpider(scrapy.Spider):
             self.stats[stats_key]["crawled"] += 1
             logging.info("queueing %s" % (relative_item_url))
             full_item_url = self.BASE_URL + relative_item_url
-            yield scrapy.Request(full_item_url, self.parse_item, meta={"item_type":item_type})
+            yield scrapy.Request(full_item_url, self.parse_item, meta={"item_type":item_type, "rent_sale": rent_sale})
 
         pagination_btn = soup.find(
             'a', attrs={"data-testid": "pagination-top-next-button"})
@@ -177,6 +158,7 @@ class WillhabenSpider(scrapy.Spider):
         item['discovery_date'] = datetime.datetime.now().strftime("%Y-%m-%d")
 
         item['type'] = response.meta["item_type"]
+        item['rent_sale'] = response.meta["rent_sale"]
 
         # time could also be added if needed: "%Y-%m-%d %H:%M:%S"
 

@@ -32,6 +32,7 @@ class CondoItem(scrapy.Item):
     contract_duration = scrapy.Field()
     construction_type = scrapy.Field()
     type = scrapy.Field()
+    rent_sale = scrapy.Field()
 
     DEFAULT_VALUE_STRING = ''
     DEFAULT_VALUE_INT = 0
@@ -39,7 +40,7 @@ class CondoItem(scrapy.Item):
 
     # Rent
     MIN_PRICE = 100
-    MAX_PRICE = 3500
+    MAX_PRICE = 3500000
     MIN_SIZE = 30
     MAX_SIZE = 2000
 
@@ -83,7 +84,7 @@ class CondoItem(scrapy.Item):
             price_text (string): something like "€ 99.750"
         """
         cleaned_price_text = price_text.replace('.', '')
-        match = re.search(r'\d+', cleaned_price_text)  # search for numbers
+        match = re.search(r'\d+', cleaned_price_text)  # search for numbers, ignore decimal part
         if match:
             price_string = match[0]  # get entire match
             try:

@@ -105,6 +105,7 @@ class DatabaseManager():
             commission_fee FLOAT,
             construction_type VARCHAR(100) COLLATE utf8_bin,
             contract_duration VARCHAR(100) COLLATE utf8_bin,
+            rent_sale VARCHAR(10) COLLATE utf8_bin,
             size INTEGER,
             room_count INTEGER,
             price_per_m2 FLOAT,
@@ -175,11 +176,11 @@ class DatabaseManager():
                                 min_price_date, max_price_date, previous_price_date,
                                 energy_info, features_info,
                                 heating_consumption, seller_is_private, contract_duration,
-                                construction_type,
+                                construction_type, rent_sale,
                                 commission_fee, size, room_count, price_per_m2,
                                 discovery_date, title, url, edit_date, address)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
                             """.format(TABLENAME)
 
             insert_tuple = (None, item['willhaben_code'], item['postal_code'],
@@ -188,7 +189,7 @@ class DatabaseManager():
                             item['edit_date'], item['edit_date'], item['edit_date'],
                             item['energy_info'], item['features_info'],
                             item['heating_consumption'], item['seller_is_private'], item['contract_duration'],
-                            item['construction_type'], item['commission_fee'],
+                            item['construction_type'], item['rent_sale'], item['commission_fee'],
                             item['size'], item['room_count'], item['price_per_m2'],
                             item['discovery_date'], item['title'], item['url'],
                             item['edit_date'], item['address'])
