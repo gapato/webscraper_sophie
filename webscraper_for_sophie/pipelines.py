@@ -7,8 +7,6 @@
 # useful for handling different item types with a single interface
 from itemadapter import ItemAdapter
 
-import logging
-
 from webscraper_for_sophie.database_manager import DatabaseManager
 
 
@@ -20,6 +18,8 @@ class WebscraperForSophiePipeline:
         self.db_manager.connect()
         self.db_manager.prep_table()
         spider.load_known_items(self.db_manager.get_known_items())
+        spider.last_timestamp = self.db_manager.load_timestamp()
+        spider.logger.info("Timestamp of last run: %s" % spider.last_timestamp)
 
     def close_spider(self, spider):
         """ This method is called when the spider is closed. """
@@ -28,9 +28,17 @@ class WebscraperForSophiePipeline:
         stats = spider.stats
         for key in stats.keys():
             s = stats[key]
-            logging.info(key.capitalize())
-            logging.info("seen: %d, crawled: %d, new: %d, price changed: %d" % (s["seen"], s["crawled"], s["new"], s["price_changed"]))
+            spider.logger.info(key.capitalize())
+            spider.logger.info("seen: %d, crawled: %d, new: %d, price changed: %d" % (s["seen"], s["crawled"], s["new"], s["price_changed"]))
 
+        if spider.interesting:
+            spider.logger.info("Found %d new interesting items: " % len(spider.interesting))
+
+        # print interesting items
+        for item in spider.interesting:
+            spider.logger.info("%s\n > %s" % (item['title'], item['url']))
+
+        self.db_manager.store_timestamp()
         self.db_manager.close()
 
     def process_item(self, item, spider):

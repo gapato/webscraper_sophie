@@ -8,7 +8,7 @@ This class defines how the willhaben website will be crawled
 # default python packages
 import datetime
 import re
-import logging
+
 # installed packages
 import scrapy
 from scrapy.spiders import CrawlSpider, Rule
@@ -63,10 +63,12 @@ class WillhabenSpider(scrapy.Spider):
     def __init__(self):
         super()
         self.start_urls = [ self.START_URL_TEMPLATE % crumb for crumb in self.CRUMBS.keys() ]
-        self.stats = {"rent flats": {"seen": 0, "crawled": 0, "new": 0, "price_changed": 0},
-                      "sale flats": {"seen": 0, "crawled": 0, "new": 0, "price_changed": 0},
-                      "rent houses": {"seen": 0, "crawled": 0, "new": 0, "price_changed": 0},
-                      "sale houses": {"seen": 0, "crawled": 0, "new": 0, "price_changed": 0}}
+        self.stats = {"rent flats":  {"seen": 0, "crawled": 0, "new": 0, "price_changed": 0, "stop": False},
+                      "sale flats":  {"seen": 0, "crawled": 0, "new": 0, "price_changed": 0, "stop": False},
+                      "rent houses": {"seen": 0, "crawled": 0, "new": 0, "price_changed": 0, "stop": False},
+                      "sale houses": {"seen": 0, "crawled": 0, "new": 0, "price_changed": 0, "stop": False}}
+        self.interesting = []
+        self.last_timestamp = datetime.datetime(1970, 1, 1)
 
     def get_type(self, response):
         url = response.url
@@ -80,7 +82,7 @@ class WillhabenSpider(scrapy.Spider):
 
     def load_known_items(self, known_items):
         self.known_items = known_items
-        logging.info("Got %d known items" % len(known_items))
+        self.logger.debug("Got %d known items" % len(known_items))
 
     def parse(self, response):
         """
@@ -100,7 +102,7 @@ class WillhabenSpider(scrapy.Spider):
 
         data_script_tag = soup.find(id="__NEXT_DATA__")
         if data_script_tag:
-            logging.info("Found NEXT_DATA script tag")
+            self.logger.debug("Found NEXT_DATA script tag")
             data_script_data = data_script_tag.string
             full_data = json.loads(data_script_data)
             ad_data_string = full_data["props"]["pageProps"]["searchResult"]["taggingData"]["tmsDataValues"]["tmsData"]["search_results"]
@@ -108,11 +110,14 @@ class WillhabenSpider(scrapy.Spider):
 
             price_data = { ad["adId"]:ad.get("price") for ad in ad_data if ad.get("price") }
         else:
-            logging.error("Did not find NEXT_DATA script tag!")
+            self.logger.error("Did not find NEXT_DATA script tag!")
             price_data = {}
 
         for relative_item_url in relative_item_urls:
 
+            if self.stats[stats_key]["stop"]:
+                self.logger.info("Reached end of last run for %s" % stats_key)
+                return
             self.stats[stats_key]["seen"] += 1
 
             # this should always match
@@ -121,23 +126,28 @@ class WillhabenSpider(scrapy.Spider):
                 willhaben_code = willhaben_code[0]
                 # check for matching item in the database
                 known_price = self.known_items.get(willhaben_code, None)
-                if known_price:
-                    # logging.info("item with code '%s' is known, price: %dEUR" % (willhaben_code, known_price))
-                    current_price_int = int(float(price_data.get(willhaben_code, -1)))
+                if known_price is not None:
+                    # self.logger.info("item with code '%s' is known, price: %dEUR" % (willhaben_code, known_price))
+                    current_price_string = price_data.get(willhaben_code, -1)
+                    try:
+                        current_price_int = int(float(current_price_string))
+                    except:
+                        self.logger.debug("Failed to parse price (%s) for item %s" % (current_price_string, willhaben_code))
+                        current_price_int = -1
                     if known_price == current_price_int:
-                        logging.info("price for item %s (%d EUR) did not change, skipping" % (willhaben_code, current_price_int))
+                        # self.logger.info("price for item %s (%d EUR) did not change, skipping" % (willhaben_code, current_price_int))
                         continue
                     else:
-                        logging.info("price for item %s (%d → %d EUR) changed!" % (willhaben_code, known_price, current_price_int))
+                        self.logger.info("price for item %s (%d → %d EUR) changed!" % (willhaben_code, known_price, current_price_int))
                         self.stats[stats_key]["price_changed"] += 1
                 else:
                     self.stats[stats_key]["new"] += 1
-                    logging.info("item '%s' is unknown" % (willhaben_code))
+                    self.logger.info("item '%s' is unknown" % (willhaben_code))
 
             self.stats[stats_key]["crawled"] += 1
-            logging.info("queueing %s" % (relative_item_url))
+            self.logger.debug("queueing %s" % (relative_item_url))
             full_item_url = self.BASE_URL + relative_item_url
-            yield scrapy.Request(full_item_url, self.parse_item, meta={"item_type":item_type, "rent_sale": rent_sale})
+            yield scrapy.Request(full_item_url, self.parse_item, meta={"item_type":item_type, "rent_sale": rent_sale, "stats_key": stats_key})
 
         pagination_btn = soup.find(
             'a', attrs={"data-testid": "pagination-top-next-button"})
@@ -160,6 +170,8 @@ class WillhabenSpider(scrapy.Spider):
         item['type'] = response.meta["item_type"]
         item['rent_sale'] = response.meta["rent_sale"]
 
+        stats_key = response.meta["stats_key"]
+
         # time could also be added if needed: "%Y-%m-%d %H:%M:%S"
 
         soup = BeautifulSoup(response.text, 'lxml')
@@ -172,18 +184,30 @@ class WillhabenSpider(scrapy.Spider):
         if title_tag:
             item['title'] = title_tag.get_text()
         else:
-            logging.error("title element not found on page " + item['url'])
+            self.logger.error("title element not found on page " + item['url'])
 
         body_tag = soup.find('article')
 
         # price
         price_tag = soup.find(
             'span', attrs={"data-testid": "contact-box-price-box-price-value-0"})
-        if price_tag:
-            visible_price_text = price_tag.get_text()
-            item.parse_price(visible_price_text)
-        else:
-            logging.error("price element not found on page " + item['url'])
+        main_price_missing = False
+        while True:
+            if price_tag:
+                visible_price_text = price_tag.get_text()
+                item.parse_price(visible_price_text)
+
+                # if parsing failed, check the label, which contains the price
+                # if the item is currently reserved
+                if item['current_price'] == -1 and not main_price_missing:
+                    main_price_missing = True
+                    self.logger.warn("main price missing for item %s" % item['url'])
+                    price_tag = soup.find(
+                        'span', attrs={"data-testid": "contact-box-price-box-price-label-0"})
+                else:
+                    break
+            else:
+                self.logger.error("price element not found on page " + item['url'])
 
         # size
         size_tag = soup.find(
@@ -192,7 +216,7 @@ class WillhabenSpider(scrapy.Spider):
             visible_size_text = size_tag.get_text()
             item.parse_size(visible_size_text)
         else:
-            logging.error("size element not found on page " + item['url'])
+            self.logger.error("size element not found on page " + item['url'])
 
         # room_count
         room_count_tag = soup.find(
@@ -201,7 +225,7 @@ class WillhabenSpider(scrapy.Spider):
             room_count_text = room_count_tag.get_text()
             item.parse_room_count(room_count_text)
         else:
-            logging.error(
+            self.logger.error(
                 "room_count element not found on page " + item['url'])
 
         # alternative size and room count parsing (from attributes)
@@ -217,7 +241,7 @@ class WillhabenSpider(scrapy.Spider):
                 if item['room_count'] == 0:
                     item.parse_room_count_2(attribute_text)
         else:
-            logging.error(
+            self.logger.error(
                 "attribute elements not found on page " + item['url'])
 
         # energy info
@@ -246,7 +270,7 @@ class WillhabenSpider(scrapy.Spider):
                     break
             item['energy_info'] = info
         else:
-            logging.warning(
+            self.logger.warning(
                 "energy info element not found on page " + item['url'])
 
         # features info
@@ -274,7 +298,7 @@ class WillhabenSpider(scrapy.Spider):
                 if m:
                     item['construction_type'] = m[0].lower()
         else:
-            logging.warning(
+            self.logger.warning(
                 "features info element not found on page " + item['url'])
 
         # address, postal_code and district
@@ -289,17 +313,17 @@ class WillhabenSpider(scrapy.Spider):
             if match:
                 item['postal_code'] = match[0]  # The entire match
             else:
-                logging.error(
+                self.logger.error(
                     "postal_code parsing failed on page " + item['url'])
             # parse district
             match = re.search(r'8\d\d\d ([^,]+)', location_address_text)
             if match:
                 item['district'] = match[1]  # The first group
             else:
-                logging.error(
+                self.logger.error(
                     "district parsing failed on page " + item['url'])
         else:
-            logging.error("element for address, postal_code and district " +
+            self.logger.error("element for address, postal_code and district " +
                           "not found on page " + item['url'])
 
         # willhaben_code
@@ -311,10 +335,10 @@ class WillhabenSpider(scrapy.Spider):
             if match:
                 item['willhaben_code'] = match[0]  # The first group
             else:
-                logging.error(
+                self.logger.error(
                     "willhaben_code parsing failed on page " + item['url'])
         else:
-            logging.error(
+            self.logger.error(
                 "willhaben_code element not found on page " + item['url'])
 
         # edit_date
@@ -322,8 +346,11 @@ class WillhabenSpider(scrapy.Spider):
             'span', attrs={"data-testid": "ad-detail-ad-edit-date"})
         if edit_date_tag:
             item['edit_date'] = datetime.datetime.strptime(edit_date_tag.get_text(), self.DATE_FORMAT_STRING)
+            if item['edit_date'] < self.last_timestamp:
+                self.stats[stats_key]["stop"] = True
+
         else:
-            logging.error("edit_date element not found on page " + item['url'])
+            self.logger.error("edit_date element not found on page " + item['url'])
 
         # private seller
         if body_tag:
@@ -337,11 +364,14 @@ class WillhabenSpider(scrapy.Spider):
             else:
                 item['commission_fee'] = 1
         else:
-            logging.error(
+            self.logger.error(
                 "commission_fee element not found on page " + item['url'])
 
         # price_per_m2
         item.calc_price_per_m2()
+
+        if item['rent_sale'] == 'rent' and item['room_count'] > 3 and item['current_price'] < 1700 and item['commission_fee'] == 0:
+            self.interesting.append({"title": item['title'], "url": item['url']})
 
         # futher item processing is done in the item pipeline
         yield item

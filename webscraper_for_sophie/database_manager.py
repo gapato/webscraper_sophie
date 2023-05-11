@@ -1,12 +1,14 @@
 # import default packages
 import logging
 import time
+import datetime
 # import installed packages
 import environs
 import mysql.connector
 from mysql.connector import errorcode
 # import project modules
 from webscraper_for_sophie.items import CondoItem
+
 
 
 env = environs.Env()
@@ -21,6 +23,8 @@ NUM_ATTEMPTS = 30
 DELAY_BTW_ATTEMPTS = 1     # in seconds
 RETRY_MSG = ("Waiting for MySQL container to start gracefully " +
              "(Attempt {} of {}) failed")
+
+DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
 class DatabaseManager():
@@ -71,6 +75,10 @@ class DatabaseManager():
         self.cursor.execute(sql_command)
         result = self.cursor.fetchone()  # fetch will return a python tuple
 
+        sql_command = "SHOW TABLES LIKE 'META'"
+        self.cursor.execute(sql_command)
+        result_meta = self.cursor.fetchone()  # fetch will return a python tuple
+
         drop = False
 
         if result and drop:
@@ -78,7 +86,28 @@ class DatabaseManager():
             logging.debug("Dropping table")
             sql_command = "DROP TABLE {0};".format(TABLENAME)
             self.cursor.execute(sql_command)
+
+            sql_command = "DROP TABLE META;"
+            self.cursor.execute(sql_command)
             self.connection.commit()
+
+        if drop or not result_meta:
+            logging.debug("Database META table does not exist")
+            sql_command = """
+            CREATE TABLE META (
+            txtkey VARCHAR(100) NOT NULL PRIMARY KEY COLLATE utf8_bin,
+            value VARCHAR(100) COLLATE utf8_bin
+            );"""
+            self.cursor.execute(sql_command)
+            self.connection.commit()
+
+            sql_command = """INSERT INTO META (txtkey, value) VALUES (%s, %s);"""
+            insert_tuple = ('last_timestamp', now)
+
+            self.cursor.execute(sql_command, insert_tuple)
+            self.connection.commit()
+
+            logging.debug("New META database table has been created")
 
         if drop or not result:
             logging.debug("Database table does not exist")
@@ -117,6 +146,7 @@ class DatabaseManager():
             self.cursor.execute(sql_command)
             self.connection.commit()
             logging.debug("New database table has been created")
+
 
     def get_known_items(self):
         sql_command = """SELECT willhaben_code, current_price FROM {0};""".format(TABLENAME)
@@ -197,3 +227,27 @@ class DatabaseManager():
             self.cursor.execute(sql_command, insert_tuple)
             # never forget this, if you want the changes to be saved:
         self.connection.commit()
+
+    def store_timestamp(self):
+        now = datetime.datetime.now().strftime(DATETIME_FORMAT)
+
+        sql_command = """UPDATE META SET value=%s WHERE txtkey=%s;"""
+        update_tuple = (now, 'last_timestamp')
+
+        try:
+            self.cursor.execute(sql_command, update_tuple)
+        except:
+            print(self.cursor.statement)
+            raise
+        self.connection.commit()
+
+    def load_timestamp(self):
+        sql_command = "SELECT value FROM META WHERE txtkey = 'last_timestamp';"
+        self.cursor.execute(sql_command)
+
+        result = self.cursor.fetchone()
+        if result:
+            return datetime.datetime.strptime(result['value'], DATETIME_FORMAT)
+        else:
+            return datetime.datetime(1970, 1, 1)
+

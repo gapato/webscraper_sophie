@@ -90,14 +90,16 @@ class CondoItem(scrapy.Item):
             try:
                 price_int = int(price_string)   # convert to int
             except ValueError:
-                logging.error("Could not convert price to int at page " +
-                              self['url'])
+                self['current_price'] = -1
+                logging.error("Could not convert price to int at page " + self['url'])
             else:
                 # realisitic value check
-                if price_int > self.MIN_PRICE and price_int < self.MAX_PRICE:
-                    self['current_price'] = price_int
-                else:
-                    logging.error("Unrealistic price at page " + self['url'])
+                self['current_price'] = price_int
+                if not (price_int > self.MIN_PRICE and price_int < self.MAX_PRICE):
+                    logging.warn("Unrealistic price at page " + self['url'])
+        else:
+            self['current_price'] = -1
+            logging.error("Could not convert price to int at page " + self['url'])
 
     def parse_size(self, size_text):
         """ Parses the size from the input text.
