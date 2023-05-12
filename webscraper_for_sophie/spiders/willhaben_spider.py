@@ -7,6 +7,7 @@ This class defines how the willhaben website will be crawled
 
 # default python packages
 import datetime
+from datetime import datetime as dt
 import re
 
 # installed packages
@@ -68,7 +69,7 @@ class WillhabenSpider(scrapy.Spider):
                       "rent houses": {"seen": 0, "crawled": 0, "new": 0, "price_changed": 0, "stop": False},
                       "sale houses": {"seen": 0, "crawled": 0, "new": 0, "price_changed": 0, "stop": False}}
         self.interesting = []
-        self.last_timestamp = datetime.datetime(1970, 1, 1)
+        self.last_timestamp = dt(1970, 1, 1)
 
     def get_type(self, response):
         url = response.url
@@ -104,50 +105,81 @@ class WillhabenSpider(scrapy.Spider):
         if data_script_tag:
             self.logger.debug("Found NEXT_DATA script tag")
             data_script_data = data_script_tag.string
-            full_data = json.loads(data_script_data)
-            ad_data_string = full_data["props"]["pageProps"]["searchResult"]["taggingData"]["tmsDataValues"]["tmsData"]["search_results"]
-            ad_data = json.loads(ad_data_string)
+            try:
+                full_data = json.loads(data_script_data)
+            except:
+                self.logger.error("Failed to parse NEXT_DATA json data")
+                raise
 
-            price_data = { ad["adId"]:ad.get("price") for ad in ad_data if ad.get("price") }
-        else:
-            self.logger.error("Did not find NEXT_DATA script tag!")
-            price_data = {}
+            ad_list = full_data["props"]["pageProps"]["searchResult"]["advertSummaryList"]["advertSummary"]
 
-        for relative_item_url in relative_item_urls:
+            for (k, ad) in enumerate(ad_list):
 
-            if self.stats[stats_key]["stop"]:
-                self.logger.info("Reached end of last run for %s" % stats_key)
-                return
-            self.stats[stats_key]["seen"] += 1
+                if self.stats[stats_key]["stop"]:
+                    self.logger.info("Reached end of last run for %s" % stats_key)
+                    return
 
-            # this should always match
-            willhaben_code = self.WILLHABEN_CODE_REGEX.match(relative_item_url.split("-")[-1])
-            if willhaben_code:
-                willhaben_code = willhaben_code[0]
+                self.stats[stats_key]["seen"] += 1
+
+                willhaben_code = str(ad["id"])
+
+                attrs = ad["attributes"]["attribute"]
+
+                # get price and publication date from the attributes
+                url = None
+                pub_date = None
+                current_price = -1
+
+                for attr in attrs:
+                    value = attr["values"][0]
+
+                    if attr["name"] == "SEO_URL":
+                        url = "%s/iad/%s" % (self.BASE_URL, value)
+                    if attr["name"] == "PUBLISHED_String":
+                        pub_date = dt.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+                    if attr["name"] == "PRICE":
+                        try:
+                            current_price = int(float(value))
+                        except:
+                            current_price = -1
+
+                collected_attrs = [url, pub_date, current_price]
+                if None in collected_attrs:
+                    self.logger.error("Failed to extract data from JSON for item %s, %s", willhaben_code, collected_attrs)
+                    continue
+
+                # Check if the item was published or updated after our last visit
+                if pub_date < self.last_timestamp:
+
+                    if k == len(ad_list)-1:
+                        # This is the last item on the page,
+                        # we can assume that items on the next pages are older
+                        # and stop the scraping here
+                        self.logger.info("Reached last known item for '%s'" % stats_key)
+                        return
+
+                    continue
+
                 # check for matching item in the database
                 known_price = self.known_items.get(willhaben_code, None)
                 if known_price is not None:
-                    # self.logger.info("item with code '%s' is known, price: %dEUR" % (willhaben_code, known_price))
-                    current_price_string = price_data.get(willhaben_code, -1)
-                    try:
-                        current_price_int = int(float(current_price_string))
-                    except:
-                        self.logger.debug("Failed to parse price (%s) for item %s" % (current_price_string, willhaben_code))
-                        current_price_int = -1
-                    if known_price == current_price_int:
+
+                    if known_price == current_price:
                         # self.logger.info("price for item %s (%d EUR) did not change, skipping" % (willhaben_code, current_price_int))
                         continue
                     else:
-                        self.logger.info("price for item %s (%d → %d EUR) changed!" % (willhaben_code, known_price, current_price_int))
+                        self.logger.info("price for item %s (%d → %d EUR) changed!" % (willhaben_code, known_price, current_price))
                         self.stats[stats_key]["price_changed"] += 1
                 else:
                     self.stats[stats_key]["new"] += 1
                     self.logger.info("item '%s' is unknown" % (willhaben_code))
 
-            self.stats[stats_key]["crawled"] += 1
-            self.logger.debug("queueing %s" % (relative_item_url))
-            full_item_url = self.BASE_URL + relative_item_url
-            yield scrapy.Request(full_item_url, self.parse_item, meta={"item_type":item_type, "rent_sale": rent_sale, "stats_key": stats_key})
+                self.stats[stats_key]["crawled"] += 1
+                self.logger.debug("queueing %s" % (url))
+                yield scrapy.Request(url, self.parse_item, meta={"item_type":item_type, "rent_sale": rent_sale, "stats_key": stats_key})
+
+        else:
+            self.logger.error("Did not find NEXT_DATA script tag!")
 
         pagination_btn = soup.find(
             'a', attrs={"data-testid": "pagination-top-next-button"})
@@ -165,7 +197,7 @@ class WillhabenSpider(scrapy.Spider):
         item = CondoItem()
         item.set_default_values()
         item['url'] = response.url
-        item['discovery_date'] = datetime.datetime.now().strftime("%Y-%m-%d")
+        item['discovery_date'] = dt.now().strftime("%Y-%m-%d")
 
         item['type'] = response.meta["item_type"]
         item['rent_sale'] = response.meta["rent_sale"]
@@ -345,7 +377,7 @@ class WillhabenSpider(scrapy.Spider):
         edit_date_tag = soup.find(
             'span', attrs={"data-testid": "ad-detail-ad-edit-date"})
         if edit_date_tag:
-            item['edit_date'] = datetime.datetime.strptime(edit_date_tag.get_text(), self.DATE_FORMAT_STRING)
+            item['edit_date'] = dt.strptime(edit_date_tag.get_text(), self.DATE_FORMAT_STRING)
             if item['edit_date'] < self.last_timestamp:
                 self.stats[stats_key]["stop"] = True
 
