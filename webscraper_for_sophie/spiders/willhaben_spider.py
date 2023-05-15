@@ -37,7 +37,7 @@ class WillhabenSpider(scrapy.Spider):
 
     # Graz flats for rent
     START_URL_TEMPLATE = 'https://www.willhaben.at/iad/immobilien/%s/steiermark/graz/?rows=90'
-    ITEM_URL_REGEX_TEMPLATE = r"\"url\":\"(\/iad\/immobilien\/d\/%s\/steiermark\/graz\/[a-z,A-Z,0-9,-]+\/)\""
+    ITEM_URL_REGEX_TEMPLATE = r"/immobilien/d/%s/steiermark/graz/"
 
     WILLHABEN_CODE_REGEX = re.compile(r"""\d{6,}""")
 
@@ -69,6 +69,7 @@ class WillhabenSpider(scrapy.Spider):
                       "rent houses": {"seen": 0, "crawled": 0, "new": 0, "price_changed": 0, "stop": False},
                       "sale houses": {"seen": 0, "crawled": 0, "new": 0, "price_changed": 0, "stop": False}}
         self.interesting = []
+        self.due_for_expiration = []
         self.last_timestamp = dt(1970, 1, 1)
 
     def get_type(self, response):
@@ -78,12 +79,18 @@ class WillhabenSpider(scrapy.Spider):
         value = self.CRUMBS.get(crumb)
         if value:
             rent_sale, type = value
-            return self.ITEM_URL_REGEX_TEMPLATE % crumb, rent_sale, type
+            return re.compile(self.ITEM_URL_REGEX_TEMPLATE % crumb), rent_sale, type
         raise ValueError("Could not determine item from for url %s" % url)
 
     def load_known_items(self, known_items):
         self.known_items = known_items
         self.logger.debug("Got %d known items" % len(known_items))
+
+    def load_due_for_expiration(self, due_items):
+        self.due_for_expiration = due_items
+
+        if len(due_items):
+            self.logger.info("Got %d items due for expiration" % len(known_items))
 
     def parse(self, response):
         """
@@ -91,6 +98,12 @@ class WillhabenSpider(scrapy.Spider):
         responses, when their requests don’t specify a callback like the
         `start_urls`
         """
+
+        # inject items which are due for expiration, this is DIRTY
+        for item in self.due_for_expiration:
+            yield scrapy.Request(item['url'], self.check_due_item, meta={"id":item['id']})
+
+        self.due_for_expiration = []
 
         # get the next page of the list
         soup = BeautifulSoup(response.text, 'lxml')
@@ -130,18 +143,33 @@ class WillhabenSpider(scrapy.Spider):
                 pub_date = None
                 current_price = -1
 
+                skip = False
+                missing_attr = 3
+
                 for attr in attrs:
                     value = attr["values"][0]
 
                     if attr["name"] == "SEO_URL":
                         url = "%s/iad/%s" % (self.BASE_URL, value)
+                        if not item_url_regex.search(url):
+                            skip = True
+                            break
+                        missing_attr -= 1
                     if attr["name"] == "PUBLISHED_String":
                         pub_date = dt.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+                        missing_attr -= 1
                     if attr["name"] == "PRICE":
                         try:
                             current_price = int(float(value))
                         except:
                             current_price = -1
+                        missing_attr -= 1
+
+                    if missing_attr == 0:
+                        break
+
+                if skip:
+                    continue
 
                 collected_attrs = [url, pub_date, current_price]
                 if None in collected_attrs:
@@ -149,6 +177,7 @@ class WillhabenSpider(scrapy.Spider):
                     continue
 
                 # Check if the item was published or updated after our last visit
+
                 if pub_date < self.last_timestamp:
 
                     if k == len(ad_list)-1:
@@ -156,6 +185,7 @@ class WillhabenSpider(scrapy.Spider):
                         # we can assume that items on the next pages are older
                         # and stop the scraping here
                         self.logger.info("Reached last known item for '%s'" % stats_key)
+                        self.stats[stats_key]["stop"] = True
                         return
 
                     continue
@@ -176,7 +206,7 @@ class WillhabenSpider(scrapy.Spider):
 
                 self.stats[stats_key]["crawled"] += 1
                 self.logger.debug("queueing %s" % (url))
-                yield scrapy.Request(url, self.parse_item, meta={"item_type":item_type, "rent_sale": rent_sale, "stats_key": stats_key})
+                yield scrapy.Request(url, self.parse_item, meta={"willhaben_code": willhaben_code, "item_type":item_type, "rent_sale": rent_sale, "stats_key": stats_key})
 
         else:
             self.logger.error("Did not find NEXT_DATA script tag!")
@@ -189,6 +219,28 @@ class WillhabenSpider(scrapy.Spider):
             return
         yield scrapy.Request(next_page_url, self.parse)
 
+    def check_due_item(self, response):
+        """returns/yields a :py:class:`WillhabenItem`.
+
+        This is the callback used by Scrapy to parse downloaded item pages.
+        """
+        item = CondoItem()
+        item.set_default_values()
+        item['url'] = response.url
+
+        now = dt.now()
+
+        item['discovery_date'] = now.strftime("%Y-%m-%d")
+        item['discovery_timestamp'] = int(now.timestamp())
+        item['sql_id'] = response.meta['id']
+        item['willhaben_code'] = response.meta['willhaben_code']
+
+        if response.status == 301 and '/d/' not in item['url']:
+            # The request has been redirected to the list page,
+            # this means that the item has expired.
+            item['expiry_date'] = item['discovery_date']
+            yield item
+
     def parse_item(self, response):
         """returns/yields a :py:class:`WillhabenItem`.
 
@@ -197,7 +249,17 @@ class WillhabenSpider(scrapy.Spider):
         item = CondoItem()
         item.set_default_values()
         item['url'] = response.url
-        item['discovery_date'] = dt.now().strftime("%Y-%m-%d")
+
+        now = dt.now()
+
+        item['discovery_date'] = now.strftime("%Y-%m-%d")
+        item['discovery_timestamp'] = int(now.timestamp())
+
+        if response.status == 301 and '/d/' not in item['url']:
+            # The request has been redirected to the list page,
+            # this means that the item has expired.
+            item['expiry_date'] = item['discovery_date']
+            yield item
 
         item['type'] = response.meta["item_type"]
         item['rent_sale'] = response.meta["rent_sale"]
@@ -240,6 +302,7 @@ class WillhabenSpider(scrapy.Spider):
                     break
             else:
                 self.logger.error("price element not found on page " + item['url'])
+                break
 
         # size
         size_tag = soup.find(
@@ -402,8 +465,8 @@ class WillhabenSpider(scrapy.Spider):
         # price_per_m2
         item.calc_price_per_m2()
 
-        if item['rent_sale'] == 'rent' and item['room_count'] > 3 and item['current_price'] < 1700 and item['commission_fee'] == 0:
-            self.interesting.append({"title": item['title'], "url": item['url']})
+        if item['rent_sale'] == 'rent' and item['room_count'] > 3 and item['current_price'] < 1700 and not item['commission_fee']:
+            self.interesting.append({"title": item['title'], "url": item['url'], "price": item['current_price'], "size": item['size'], "room_count": item['room_count']})
 
         # futher item processing is done in the item pipeline
         yield item

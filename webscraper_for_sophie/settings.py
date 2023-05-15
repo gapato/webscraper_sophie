@@ -12,6 +12,7 @@ BOT_NAME = 'webscraper_for_sophie'
 SPIDER_MODULES = ['webscraper_for_sophie.spiders']
 NEWSPIDER_MODULE = 'webscraper_for_sophie.spiders'
 
+REQUEST_FINGERPRINTER_IMPLEMENTATION = "2.7"
 
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
 #USER_AGENT = 'webscraper_for_sophie (+http://www.yourdomain.com)'
@@ -34,7 +35,7 @@ DOWNLOAD_DELAY = 2
 COOKIES_ENABLED = False
 
 # Disable Telnet Console (enabled by default)
-#TELNETCONSOLE_ENABLED = False
+TELNETCONSOLE_ENABLED = False
 
 # Override the default request headers:
 # DEFAULT_REQUEST_HEADERS = {

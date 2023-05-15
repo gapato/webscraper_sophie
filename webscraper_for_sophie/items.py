@@ -21,6 +21,7 @@ class CondoItem(scrapy.Item):
     features_info = scrapy.Field()
     energy_info = scrapy.Field()
     discovery_date = scrapy.Field()
+    discovery_timestamp = scrapy.Field()
     edit_date = scrapy.Field()
     description = scrapy.Field()
     address = scrapy.Field()
@@ -33,6 +34,8 @@ class CondoItem(scrapy.Item):
     construction_type = scrapy.Field()
     type = scrapy.Field()
     rent_sale = scrapy.Field()
+    expiry_date = scrapy.Field()
+    sql_id = scrapy.Field()
 
     DEFAULT_VALUE_STRING = ''
     DEFAULT_VALUE_INT = 0
@@ -63,7 +66,7 @@ class CondoItem(scrapy.Item):
         self['description'] = self.DEFAULT_VALUE_STRING
         self['address'] = self.DEFAULT_VALUE_STRING
         self['willhaben_code'] = self.DEFAULT_VALUE_STRING
-        self['commission_fee'] = self.DEFAULT_VALUE_STRING
+        self['commission_fee'] = self.DEFAULT_VALUE_INT
         self['price_per_m2'] = self.DEFAULT_VALUE_INT
         self['energy_info']   = None
         self['features_info'] = None
@@ -71,6 +74,8 @@ class CondoItem(scrapy.Item):
         self['seller_is_private'] = self.DEFAULT_VALUE_BOOL
         self['contract_duration'] = None
         self['construction_type'] = None
+        self['expiry_date'] = None
+        self['sql_id'] = None
 
     def calc_price_per_m2(self):
         """ Calculate the price per square meter. """

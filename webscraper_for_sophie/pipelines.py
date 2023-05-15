@@ -19,6 +19,7 @@ class WebscraperForSophiePipeline:
         self.db_manager.prep_table()
         spider.load_known_items(self.db_manager.get_known_items())
         spider.last_timestamp = self.db_manager.load_timestamp()
+        spider.load_due_for_expiration(self.db_manager.get_due_for_expiration())
         spider.logger.info("Timestamp of last run: %s" % spider.last_timestamp)
 
     def close_spider(self, spider):
@@ -36,7 +37,7 @@ class WebscraperForSophiePipeline:
 
         # print interesting items
         for item in spider.interesting:
-            spider.logger.info("%s\n > %s" % (item['title'], item['url']))
+            spider.logger.info("%s\n > [%dEUR / %d m² / #%d] %s" % (item['title'], item['price'], item['size'], item['room_count'], item['url']))
 
         self.db_manager.store_timestamp()
         self.db_manager.close()
