@@ -36,6 +36,7 @@ class CondoItem(scrapy.Item):
     rent_sale = scrapy.Field()
     expiry_date = scrapy.Field()
     sql_id = scrapy.Field()
+    has_json_details = scrapy.Field()
 
     DEFAULT_VALUE_STRING = ''
     DEFAULT_VALUE_INT = 0
@@ -76,6 +77,7 @@ class CondoItem(scrapy.Item):
         self['construction_type'] = None
         self['expiry_date'] = None
         self['sql_id'] = None
+        self['has_json_details'] = self.DEFAULT_VALUE_BOOL
 
     def calc_price_per_m2(self):
         """ Calculate the price per square meter. """

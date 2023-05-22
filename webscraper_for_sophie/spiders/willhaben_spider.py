@@ -10,6 +10,8 @@ import datetime
 from datetime import datetime as dt
 import re
 
+# from IPython import embed
+
 # installed packages
 import scrapy
 from scrapy.spiders import CrawlSpider, Rule
@@ -46,6 +48,7 @@ class WillhabenSpider(scrapy.Spider):
     PRICE_REGEX = re.compile(r"""\d+""")
 
     DATE_FORMAT_STRING = "%d.%m.%Y, %H:%M Uhr"
+    DATETIME_OFFSET_FORMAT_STRING = "%Y-%m-%dT%H:%M:%S%z"
 
     COMMISSION_REGEX = re.compile(r"""provi([a-z]+)frei|privatperson|bezahlt der abgeber""", flags=re.I)
 
@@ -124,7 +127,13 @@ class WillhabenSpider(scrapy.Spider):
                 self.logger.error("Failed to parse NEXT_DATA json data")
                 raise
 
-            ad_list = full_data["props"]["pageProps"]["searchResult"]["advertSummaryList"]["advertSummary"]
+            page_props = full_data["props"]["pageProps"]
+
+            if page_props.get("advertDetails") is not None:
+                item['has_json_details'] = True
+
+
+            ad_list = page_props["searchResult"]["advertSummaryList"]["advertSummary"]
 
             for (k, ad) in enumerate(ad_list):
 
@@ -269,9 +278,37 @@ class WillhabenSpider(scrapy.Spider):
         # time could also be added if needed: "%Y-%m-%d %H:%M:%S"
 
         soup = BeautifulSoup(response.text, 'lxml')
-        # remove all script tags from soup
-        for s in soup('script'):
-            s.clear()
+        # # remove all script tags from soup
+        # for s in soup('script'):
+        #     s.clear()
+
+        data_script_tag = soup.find(id="__NEXT_DATA__")
+
+        if data_script_tag:
+            self.logger.debug("Found NEXT_DATA script tag")
+            data_script_data = data_script_tag.string
+
+            full_data = json.loads(data_script_data)
+            page_props = full_data["props"]["pageProps"]
+
+            if page_props.get("advertDetails") is not None:
+
+                self.logger.debug("Item has JSON ad details")
+
+                item['has_json_details'] = True
+
+                details = page_props["advertDetails"]
+                for d in details["attributes"]["attribute"]:
+                    if d["name"] == "CONTACT/EMAIL":
+                        self.logger.info("Found e-mail: %s" % d["values"][0])
+
+                start_date = dt.strptime(details["startDate"], self.DATETIME_OFFSET_FORMAT_STRING)
+                item['discovery_date'] = start_date.strftime("%Y-%m-%d %H:%M:%S")
+                item['discovery_timestamp'] = int(now.timestamp())
+
+            # try:
+            # except:
+            #     self.logger.error("Failed to parse NEXT_DATA json data for item %s" % item['url'])
 
         # title
         title_tag = soup.find('h1')

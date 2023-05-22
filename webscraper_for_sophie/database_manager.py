@@ -44,8 +44,8 @@ TABLENAME = env("TABLENAME")
 SQL_CMD_INIT_META = """INSERT INTO META (txtkey, value) VALUES ({0}, {0});""".format(SQL_PLACEHOLDER)
 SQL_CMD_UPDATE_ITEM = """UPDATE {0} SET current_price={1}, price_per_m2={1}, edit_date={1}, min_price={1}, max_price={1}, previous_price={1}, min_price_date={1}, max_price_date={1}, previous_price_date={1} WHERE id = {1};""".format(TABLENAME, SQL_PLACEHOLDER)
 SQL_CMD_UPDATE_ITEM_EXPIRED = """UPDATE {0} SET expiry_date={1}, expiry_last_check_timestamp={1} WHERE id = {1};""".format(TABLENAME, SQL_PLACEHOLDER)
-SQL_CMD_SELECT_ITEM = """SELECT id, current_price, min_price, max_price, previous_price, min_price_date, max_price_date, previous_price_date, edit_date FROM {0} where willhaben_code = {1} LIMIT 1""".format(TABLENAME, SQL_PLACEHOLDER)
-SQL_CMD_SELECT_ITEM_ID = """SELECT id, current_price, min_price, max_price, previous_price, min_price_date, max_price_date, previous_price_date, edit_date FROM {0} where id = {1} LIMIT 1""".format(TABLENAME, SQL_PLACEHOLDER)
+SQL_CMD_SELECT_ITEM = """SELECT id, current_price, min_price, max_price, previous_price, min_price_date, max_price_date, previous_price_date, edit_date FROM {0} WHERE willhaben_code = {1} LIMIT 1""".format(TABLENAME, SQL_PLACEHOLDER)
+SQL_CMD_SELECT_ITEM_ID = """SELECT id, current_price, min_price, max_price, previous_price, min_price_date, max_price_date, previous_price_date, edit_date FROM {0} WHERE id = {1} LIMIT 1""".format(TABLENAME, SQL_PLACEHOLDER)
 SQL_CMD_INSERT_ITEM = """INSERT INTO {0}
                     (id, willhaben_code, postal_code, district, type, current_price,
                     min_price, max_price, previous_price,
@@ -54,12 +54,13 @@ SQL_CMD_INSERT_ITEM = """INSERT INTO {0}
                     heating_consumption, seller_is_private, contract_duration,
                     construction_type, rent_sale,
                     commission_fee, size, room_count, price_per_m2,
-                    discovery_date, discovery_timestamp, title, url, edit_date, address)
+                    discovery_date, discovery_timestamp, expiry_last_check_timestamp, title, url, edit_date, address,
+                    has_json_details)
                 VALUES ({1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1},
-                {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1});
+                {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1}, {1});
                 """.format(TABLENAME, SQL_PLACEHOLDER)
 SQL_CMD_UPDATE_TIMESTAMP = """UPDATE META SET value={0} WHERE txtkey={0};""".format(SQL_PLACEHOLDER)
-SQL_CMD_DUE_EXPIRY = """SELECT id, willhaben_code, url FROM {0} WHERE expiry_last_check_timestamp < {1};""".format(TABLENAME, SQL_PLACEHOLDER)
+SQL_CMD_DUE_EXPIRY = """SELECT id, willhaben_code, url FROM {0} WHERE expiry_last_check_timestamp < {1} AND expiry_date IS NULL;""".format(TABLENAME, SQL_PLACEHOLDER)
 
 DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 
@@ -192,9 +193,10 @@ class DatabaseManager():
             title TEXT{1},
             url TEXT{1},
             edit_date DATETIME,
-            expity_date DATETIME,
+            expiry_date DATETIME,
             expiry_last_check_timestamp INTEGER,
-            address VARCHAR(100){1});""".format(TABLENAME, COLLATION, SQL_AUTOINCREMENT_STR)
+            address VARCHAR(100){1},
+            has_json_details BIT);""".format(TABLENAME, COLLATION, SQL_AUTOINCREMENT_STR)
             self.cursor.execute(sql_command)
             self.connection.commit()
             logging.debug("New database table has been created")
@@ -223,7 +225,7 @@ class DatabaseManager():
             item: the CondoItem that should be inserted in the database.
         """
 
-        if item.get('expity_date') is not None:
+        if item.get('expiry_date') is not None:
             now_ts = int(datetime.datetime.now().timestamp())
             sql_command = SQL_CMD_UPDATE_ITEM_EXPIRED
             update_tuple = (item['expiry_date'], now_ts, item['sql_id'])
@@ -286,8 +288,8 @@ class DatabaseManager():
                             item['heating_consumption'], item['seller_is_private'], item['contract_duration'],
                             item['construction_type'], item['rent_sale'], item['commission_fee'],
                             item['size'], item['room_count'], item['price_per_m2'],
-                            item['discovery_date'], item['discovery_timestamp'], item['title'], item['url'],
-                            item['edit_date'], item['address'])
+                            item['discovery_date'], item['discovery_timestamp'], item['discovery_timestamp'], item['title'], item['url'],
+                            item['edit_date'], item['address'], item['has_json_details'])
             # use parameterized input to avoid SQL injection
             self.cursor.execute(sql_command, insert_tuple)
             # never forget this, if you want the changes to be saved:

@@ -4,6 +4,8 @@
 #
 #    pip-compile requirements/requirements.in
 #
+arrow==1.2.3
+    # via -r requirements/requirements.in
 attrs==20.2.0
     # via
     #   automat
@@ -79,6 +81,8 @@ pyhamcrest==2.0.2
     # via twisted
 pyopenssl==23.1.1
     # via scrapy
+python-dateutil==2.8.2
+    # via arrow
 python-dotenv==0.15.0
     # via environs
 queuelib==1.5.0
@@ -98,6 +102,7 @@ six==1.15.0
     #   automat
     #   parsel
     #   protego
+    #   python-dateutil
     #   requests-file
     #   w3lib
 soupsieve==2.0.1
